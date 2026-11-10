@@ -10,7 +10,7 @@ import streamlit as st
 from PIL import Image
 
 # Our modules
-from modules.crypto import encrypt_message
+from modules.crypto import encrypt_message, decrypt_message
 from modules.steganography import encode_message, extract_message
 from utils.image_utils import load_image, max_payload_bytes, calculate_psnr
 
@@ -497,16 +497,79 @@ elif page == "Encode Message":
                     st.error(f"Encoding failed: {e}")
 
 
-# ---------------------------------------------------------------------------
-# Placeholder pages (other members will implement)
-# ---------------------------------------------------------------------------
 elif page == "Decode Message":
-    placeholder_page(
+    page_header(
         "Decode message",
-        "Recover a hidden message from a stego image.",
-        "Member 2 (Cryptography)",
-        "Planned flow: upload the stego PNG, enter the password, extract the payload, then decrypt it.",
+        "Extract the hidden payload from a stego PNG and decrypt it with AES-GCM.",
     )
+
+    left, right = st.columns([1, 1], gap="large")
+
+    with left:
+        with st.container(border=True):
+            st.markdown('<div class="pb-section">1 · Stego image</div>', unsafe_allow_html=True)
+            uploaded = st.file_uploader(
+                "Upload the stego PNG",
+                type=["png"],
+                help="The image that was produced by the Encode page.",
+                label_visibility="collapsed",
+            )
+            if uploaded:
+                try:
+                    preview = Image.open(uploaded)
+                    st.image(preview, caption=f"{preview.width} × {preview.height} px", use_container_width=True)
+                    uploaded.seek(0)
+                except Exception:
+                    uploaded.seek(0)
+
+        with st.container(border=True):
+            st.markdown('<div class="pb-section">2 · Password</div>', unsafe_allow_html=True)
+            password = st.text_input(
+                "Password used during encoding",
+                type="password",
+                help="Must be exactly the same password that was used to encrypt the message.",
+            )
+            go = st.button("Extract & decrypt", type="primary", use_container_width=True)
+
+    with right:
+        if not go:
+            st.markdown(
+                '<div class="pb-card"><div class="pb-icon">🔓</div>'
+                "<h3>Decrypted message will appear here</h3>"
+                "<p>Upload the stego PNG, enter the correct password, then click "
+                "<b>Extract &amp; decrypt</b>.</p></div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            if not uploaded:
+                st.error("Upload a stego PNG first.")
+            elif not password:
+                st.error("Enter the password.")
+            else:
+                try:
+                    # 1. Load image
+                    stego = load_image(uploaded)
+
+                    # 2. Extract encrypted payload
+                    with st.spinner("Extracting hidden payload…"):
+                        encrypted = extract_message(stego)
+
+                    st.info(f"Extracted encrypted payload: **{len(encrypted)}** bytes")
+
+                    # 3. Decrypt + integrity check
+                    with st.spinner("Decrypting (AES-GCM)…"):
+                        message = decrypt_message(encrypted, password)
+
+                    # 4. Success
+                    st.success("Message successfully recovered and verified.")
+                    st.markdown("### Original message")
+                    st.code(message, language=None)
+
+                except ValueError as e:
+                    st.error(f"{e}")
+                    st.caption("Most common causes: wrong password or the image was modified.")
+                except Exception as e:
+                    st.error(f"Extraction / decryption error: {e}")
 
 elif page == "Image Analysis":
     placeholder_page(
