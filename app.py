@@ -324,13 +324,6 @@ with st.sidebar:
     page = page.split("  ", 1)[1]  # strip the emoji prefix
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown(
-        '<div class="pb-team"><b>Group members</b><br>'
-        "Moeez Salman · 23L-3000<br>"
-        "Eishah Iqbal Malik · 23L-2587<br>"
-        "Muhammad Mustafa · 23L-3026</div>",
-        unsafe_allow_html=True,
-    )
 
 
 # ---------------------------------------------------------------------------
