@@ -7,7 +7,7 @@ from __future__ import annotations
 import io
 
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageDraw, ImageChops
 
 import numpy as np
 import pandas as pd
@@ -27,12 +27,67 @@ from utils.image_utils import load_image, max_payload_bytes, calculate_psnr
 # ---------------------------------------------------------------------------
 # Page configuration
 # ---------------------------------------------------------------------------
+def make_favicon() -> Image.Image:
+    """Teal tile with a padlock whose body shows a picture (matches the sidebar logo)."""
+    s = 128
+    k = s / 44
+    teal = (13, 148, 136, 255)
+    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((0, 0, s - 1, s - 1), radius=30, fill=teal)
+
+    # shackle
+    w = round(3.4 * k)
+    d.arc((14 * k, 7 * k, 30 * k, 23 * k), 180, 360, fill="white", width=w)
+    d.line((14 * k, 15 * k, 14 * k, 21 * k), fill="white", width=w)
+    d.line((30 * k, 15 * k, 30 * k, 21 * k), fill="white", width=w)
+
+    # lock body
+    body = (9 * k, 19 * k, 35 * k, 39 * k)
+    d.rounded_rectangle(body, radius=4 * k, fill="white")
+
+    # picture inset (sun, mountains, hidden bit), clipped to the inset shape
+    inset = (12 * k, 22.5 * k, 32 * k, 35.5 * k)
+    d.rounded_rectangle(inset, radius=2 * k, fill=(205, 238, 234, 255))
+    layer = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    ld.ellipse(((17 - 2) * k, (27.5 - 2) * k, (17 + 2) * k, (27.5 + 2) * k), fill=teal)
+    pts = [(12, 35.5), (12, 33), (17, 29.5), (21, 32.5), (25, 28.5), (32, 33.5), (32, 35.5)]
+    ld.polygon([(x * k, y * k) for x, y in pts], fill=teal)
+    ld.rectangle((28.2 * k, 23.8 * k, 30.8 * k, 26.4 * k), fill=(245, 158, 11, 255))
+    mask = Image.new("L", (s, s), 0)
+    ImageDraw.Draw(mask).rounded_rectangle(inset, radius=2 * k, fill=255)
+    layer.putalpha(ImageChops.multiply(layer.getchannel("A"), mask))
+    return Image.alpha_composite(img, layer)
+
+
 st.set_page_config(
     page_title="PhantomBits",
-    page_icon="👻",
+    page_icon=make_favicon(),
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Sidebar logo: a padlock whose body shows a picture (image steganography)
+LOGO_SVG = """
+<svg viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="pbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d9488"/><stop offset="1" stop-color="#0f766e"/>
+    </linearGradient>
+    <clipPath id="pbpic"><rect x="12" y="22.5" width="20" height="13" rx="2"/></clipPath>
+  </defs>
+  <rect width="44" height="44" fill="url(#pbg)"/>
+  <path d="M14 21V15a8 8 0 0 1 16 0v6" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/>
+  <rect x="9" y="19" width="26" height="20" rx="4" fill="#fff"/>
+  <rect x="12" y="22.5" width="20" height="13" rx="2" fill="#cdeeea"/>
+  <g clip-path="url(#pbpic)" fill="#0d9488">
+    <circle cx="17" cy="27.5" r="2"/>
+    <path d="M12 35.5V33l5-3.5 4 3 4-4 7 5v2z"/>
+  </g>
+  <rect x="28.2" y="23.8" width="2.6" height="2.6" rx=".4" fill="#f59e0b"/>
+</svg>
+"""
 
 # ---------------------------------------------------------------------------
 # Theme (CSS)
@@ -77,32 +132,13 @@ section[data-testid="stSidebar"] {
     background: linear-gradient(180deg, #ffffff 0%, #eef4f2 100%);
     border-right: 1px solid var(--line);
 }
-section[data-testid="stSidebar"] .stRadio > label { display: none; }
-section[data-testid="stSidebar"] div[role="radiogroup"] { gap: .35rem; }
-section[data-testid="stSidebar"] div[role="radiogroup"] label {
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 12px;
-    padding: .6rem .85rem;
-    transition: all .18s ease;
-}
-section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
-    background: rgba(13,148,136,.10);
-    border-color: var(--line);
-}
-section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
-    background: linear-gradient(90deg, rgba(13,148,136,.28), rgba(245,158,11,.12));
-    border-color: rgba(13,148,136,.5);
-}
-section[data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child { display: none; }
 
 .pb-brand { display:flex; align-items:center; gap:.7rem; margin-bottom:.2rem; }
 .pb-logo {
-    width:42px; height:42px; border-radius:12px; display:grid; place-items:center;
-    font-size:1.4rem;
-    background: linear-gradient(135deg, var(--violet), var(--pink));
-    box-shadow: 0 8px 28px rgba(13,148,136,.45);
+    width:42px; height:42px; flex:0 0 42px; border-radius:12px; overflow:hidden;
+    box-shadow: 0 3px 10px rgba(15,60,50,.18);
 }
+.pb-logo svg { display:block; width:100%; height:100%; }
 .pb-brand-name { font-family:'Sora',sans-serif; font-weight:800; font-size:1.25rem; }
 .pb-tag { color: var(--muted); font-size:.85rem; margin-bottom:1.2rem; }
 .pb-team {
@@ -229,7 +265,6 @@ div[data-testid="stAlert"] { border-radius: 14px; }
 .pb-chip:nth-child(3) { animation-delay:.74s; } .pb-chip:nth-child(4) { animation-delay:.86s; }
 .pb-chip i { animation: pb-blink 2.4s ease-in-out infinite; }
 
-.pb-logo { animation: pb-pulse 3.2s ease-in-out infinite; }
 .pb-card { animation: pb-rise .7s cubic-bezier(.2,.7,.2,1) both; }
 [data-testid="column"]:nth-child(1) .pb-card { animation-delay:.15s; }
 [data-testid="column"]:nth-child(2) .pb-card { animation-delay:.30s; }
@@ -294,6 +329,81 @@ section[data-testid="stSidebar"] { box-shadow: 8px 0 30px -24px rgba(15,60,50,.4
 st.markdown(CSS, unsafe_allow_html=True)
 
 
+# ---------------------------------------------------------------------------
+# Sidebar navigation style (buttons with Material icons, no radio circles)
+# ---------------------------------------------------------------------------
+NAV_CSS = """
+<style>
+section[data-testid="stSidebar"] .stButton { margin-bottom: .3rem; }
+.stApp section[data-testid="stSidebar"] .stButton > button {
+    width: 100%; justify-content: flex-start; gap: .7rem;
+    padding: .65rem .9rem !important; border-radius: 12px;
+    background: transparent !important; border: 1px solid transparent !important;
+    box-shadow: none !important; transform: none !important;
+    transition: background .18s ease, border-color .18s ease;
+}
+.stApp section[data-testid="stSidebar"] .stButton > button > div {
+    justify-content: flex-start; width: 100%; gap: .7rem;
+}
+.stApp section[data-testid="stSidebar"] .stButton > button::after { display: none !important; }
+.stApp section[data-testid="stSidebar"] .stButton > button p {
+    color: #10231f !important; font-weight: 600; font-size: .95rem; margin: 0;
+}
+.stApp section[data-testid="stSidebar"] .stButton > button span[data-testid="stIconMaterial"] {
+    color: #5a6b66 !important; font-size: 1.35rem;
+}
+/* hover */
+.stApp section[data-testid="stSidebar"] .stButton > button:hover {
+    background: rgba(13,148,136,.10) !important; border-color: var(--line) !important;
+}
+.stApp section[data-testid="stSidebar"] .stButton > button:hover span[data-testid="stIconMaterial"] {
+    color: #0d9488 !important;
+}
+/* selected page = the primary button */
+.stApp section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+    background: linear-gradient(90deg, rgba(13,148,136,.28), rgba(245,158,11,.12)) !important;
+    border-color: rgba(13,148,136,.5) !important;
+}
+.stApp section[data-testid="stSidebar"] .stButton > button[kind="primary"] p { color: #0f766e !important; }
+.stApp section[data-testid="stSidebar"] .stButton > button[kind="primary"] span[data-testid="stIconMaterial"] {
+    color: #0d9488 !important;
+}
+</style>
+"""
+st.markdown(NAV_CSS, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Card icons: the same clean line style as the rest of the UI (replaces emojis)
+# ---------------------------------------------------------------------------
+ICON_PATHS = {
+    "lock": "<rect width='18' height='11' x='3' y='11' rx='2'/><path d='M7 11V7a5 5 0 0 1 10 0v4'/>",
+    "unlock": "<rect width='18' height='11' x='3' y='11' rx='2'/><path d='M7 11V7a5 5 0 0 1 9.9-1'/>",
+    "scan": (
+        "<path d='M3 7V5a2 2 0 0 1 2-2h2'/><path d='M17 3h2a2 2 0 0 1 2 2v2'/>"
+        "<path d='M21 17v2a2 2 0 0 1-2 2h-2'/><path d='M7 21H5a2 2 0 0 1-2-2v-2'/>"
+        "<circle cx='12' cy='12' r='3'/><path d='m16 16-1.9-1.9'/>"
+    ),
+    "image": (
+        "<rect width='18' height='18' x='3' y='3' rx='2'/><circle cx='9' cy='9' r='2'/>"
+        "<path d='m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21'/>"
+    ),
+    "chart": "<path d='M3 3v16a2 2 0 0 0 2 2h16'/><path d='M18 17V9'/><path d='M13 17V5'/><path d='M8 17v-3'/>",
+    "tool": (
+        "<path d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94"
+        "l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94z'/>"
+    ),
+}
+
+
+def icon_svg(name: str, size: int = 24) -> str:
+    return (
+        f"<svg xmlns='http://www.w3.org/2000/svg' width='{size}' height='{size}' viewBox='0 0 24 24' "
+        "fill='none' stroke='#0d9488' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
+        f"{ICON_PATHS[name]}</svg>"
+    )
+
+
 def page_header(title: str, subtitle: str) -> None:
     st.markdown(
         f'<div class="pb-head"><h1>{title}</h1><p>{subtitle}</p></div>',
@@ -304,7 +414,7 @@ def page_header(title: str, subtitle: str) -> None:
 def placeholder_page(title: str, subtitle: str, owner: str, extra: str = "") -> None:
     page_header(title, subtitle)
     st.markdown(
-        f'<div class="pb-card"><div class="pb-icon">🚧</div>'
+        f'<div class="pb-card"><div class="pb-icon">{icon_svg("tool")}</div>'
         f"<h3>Coming soon</h3><p>This page will be implemented by {owner}. {extra}</p></div>",
         unsafe_allow_html=True,
     )
@@ -313,26 +423,38 @@ def placeholder_page(title: str, subtitle: str, owner: str, extra: str = "") -> 
 # ---------------------------------------------------------------------------
 # Sidebar navigation
 # ---------------------------------------------------------------------------
+NAV_ITEMS = [
+    ("Dashboard", ":material/dashboard:"),
+    ("Encode Message", ":material/lock:"),
+    ("Decode Message", ":material/lock_open:"),          # Member 2
+    ("Image Analysis", ":material/image_search:"),       # Member 3
+    ("Performance Evaluation", ":material/bar_chart:"),  # Member 3
+]
+
 with st.sidebar:
     st.markdown(
-        '<div class="pb-brand"><div class="pb-logo">👻</div>'
+        f'<div class="pb-brand"><div class="pb-logo">{LOGO_SVG}</div>'
         '<div class="pb-brand-name">PhantomBits</div></div>'
         '<div class="pb-tag">Secure image steganography &amp; steganalysis</div>',
         unsafe_allow_html=True,
     )
 
-    page = st.radio(
-        "Navigate",
-        options=[
-            "🏠  Dashboard",
-            "🔒  Encode Message",
-            "🔓  Decode Message",        # Member 2
-            "🔍  Image Analysis",        # Member 3
-            "📊  Performance Evaluation",  # Member 3
-        ],
-        label_visibility="collapsed",
-    )
-    page = page.split("  ", 1)[1]  # strip the emoji prefix
+    if "page" not in st.session_state:
+        st.session_state.page = "Dashboard"
+
+    for name, icon in NAV_ITEMS:
+        is_active = st.session_state.page == name
+        if st.button(
+            name,
+            icon=icon,
+            key=f"nav_{name}",
+            type="primary" if is_active else "secondary",
+            width="stretch",
+        ):
+            st.session_state.page = name
+            st.rerun()
+
+    page = st.session_state.page
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -361,14 +483,14 @@ checks images for signs that someone else did the same.</p>
 
     c1, c2, c3 = st.columns(3, gap="medium")
     cards = [
-        ("🔒", "Encode", "Encrypt a message with a password and hide it inside an image."),
-        ("🔓", "Decode", "Recover and decrypt a hidden message from a stego image."),
-        ("🔍", "Analyse", "Check whether an image may contain hidden data."),
+        ("lock", "Encode", "Encrypt a message with a password and hide it inside an image."),
+        ("unlock", "Decode", "Recover and decrypt a hidden message from a stego image."),
+        ("scan", "Analyse", "Check whether an image may contain hidden data."),
     ]
     for col, (icon, title, text) in zip((c1, c2, c3), cards):
         with col:
             st.markdown(
-                f'<div class="pb-card"><div class="pb-icon">{icon}</div>'
+                f'<div class="pb-card"><div class="pb-icon">{icon_svg(icon)}</div>'
                 f"<h3>{title}</h3><p>{text}</p></div>",
                 unsafe_allow_html=True,
             )
@@ -433,7 +555,7 @@ elif page == "Encode Message":
     with right:
         if not go:
             st.markdown(
-                '<div class="pb-card"><div class="pb-icon">👻</div>'
+                f'<div class="pb-card"><div class="pb-icon">{icon_svg("image")}</div>'
                 "<h3>Your stego image will appear here</h3>"
                 "<p>Add a PNG, a message and a password, then select <b>Encrypt &amp; hide</b>. "
                 "You'll see a side-by-side comparison, the quality score and a download button.</p></div>",
@@ -543,7 +665,7 @@ elif page == "Decode Message":
     with right:
         if not go:
             st.markdown(
-                '<div class="pb-card"><div class="pb-icon">🔓</div>'
+                f'<div class="pb-card"><div class="pb-icon">{icon_svg("unlock")}</div>'
                 "<h3>Decrypted message will appear here</h3>"
                 "<p>Upload the stego PNG, enter the correct password, then click "
                 "<b>Extract &amp; decrypt</b>.</p></div>",
@@ -599,7 +721,7 @@ elif page == "Image Analysis":
 
     if not run:
         st.markdown(
-            '<div class="pb-card"><div class="pb-icon">🔍</div>'
+            f'<div class="pb-card"><div class="pb-icon">{icon_svg("scan")}</div>'
             "<h3>Your analysis will appear here</h3>"
             "<p>Upload a PNG and select <b>Analyse image</b>. "
             "Two checks look for traces of LSB hiding: a header check "
@@ -699,7 +821,7 @@ elif page == "Performance Evaluation":
 
     if not run_eval:
         st.markdown(
-            '<div class="pb-card"><div class="pb-icon">📊</div>'
+            f'<div class="pb-card"><div class="pb-icon">{icon_svg("chart")}</div>'
             "<h3>Your results will appear here</h3>"
             "<p>The app hides random data in your image at 5% up to 100% of its capacity, "
             "then measures image quality (PSNR, MSE, SSIM) and checks whether "
