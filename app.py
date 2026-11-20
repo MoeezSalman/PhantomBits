@@ -13,6 +13,10 @@ import numpy as np
 import pandas as pd
 from modules.steganalysis import rs_analysis, header_check
 from modules.evaluation import evaluate_embedding, clean_baseline
+from modules.visuals import (
+    lsb_planes, plane_view, results_table,
+    rs_chart, psnr_chart, fill_chart,
+)
 
 # Our modules
 from modules.crypto import encrypt_message, decrypt_message
@@ -278,6 +282,13 @@ div[data-testid="stAlert"] { animation: pb-pop .4s ease both; }
 div[data-testid="stVerticalBlockBorderWrapper"] { box-shadow: 0 12px 30px -22px rgba(15,60,50,.4); }
 section[data-testid="stSidebar"] { box-shadow: 8px 0 30px -24px rgba(15,60,50,.4); }
 #MainMenu, footer { visibility: hidden; }
+
+/* Tabs: always clearly visible (also when the browser is in dark mode) */
+.stApp [data-testid="stTabs"] [role="tab"],
+.stApp [data-testid="stTabs"] [role="tab"] *,
+.stApp button[data-baseweb="tab"] p { color: #10231f !important; opacity: 1 !important; font-weight: 600; }
+.stApp [data-testid="stTabs"] [role="tab"][aria-selected="true"],
+.stApp [data-testid="stTabs"] [role="tab"][aria-selected="true"] * { color: #0d9488 !important; }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -575,85 +586,98 @@ elif page == "Image Analysis":
         "Check an image for statistical signs of hidden data.",
     )
 
-    left, right = st.columns([1, 1], gap="large")
-
-    with left:
-        with st.container(border=True):
-            st.markdown('<div class="pb-section">1 · Image to analyse</div>', unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown('<div class="pb-section">1 · Image to analyse</div>', unsafe_allow_html=True)
+        up_col, btn_col = st.columns([3, 1], gap="large", vertical_alignment="center")
+        with up_col:
             analysis_file = st.file_uploader(
-                "Upload a PNG image",
-                type=["png"],
-                key="analysis_upload",
+                "Upload a PNG image", type=["png"], key="analysis_upload",
                 label_visibility="collapsed",
             )
+        with btn_col:
             run = st.button("Analyse image", type="primary", width="stretch")
 
-    with right:
-        if not run:
+    if not run:
+        st.markdown(
+            '<div class="pb-card"><div class="pb-icon">🔍</div>'
+            "<h3>Your analysis will appear here</h3>"
+            "<p>Upload a PNG and select <b>Analyse image</b>. "
+            "Two checks look for traces of LSB hiding: a header check "
+            "and RS analysis.</p></div>",
+            unsafe_allow_html=True,
+        )
+    elif not analysis_file:
+        st.error("Upload a PNG image first.")
+    else:
+        try:
+            img = load_image(analysis_file)
+            with st.spinner("Analysing image…"):
+                head = header_check(img)
+                rs = rs_analysis(img)
+
+            rs_flag = rs["max_rate"] >= 0.30
+            final_rate = rs["rates"][-1]
+
+            # ---- verdict --------------------------------------------------
+            if head["found"]:
+                st.error(
+                    f"PhantomBits hidden data found: a valid header announces "
+                    f"a payload of {head['length']} bytes."
+                )
+            elif rs_flag:
+                st.warning("Possible hidden data detected (RS analysis).")
+            else:
+                st.success("No strong sign of hidden data.")
+
+            # ---- stat tiles -----------------------------------------------
+            head_text = "Found" if head["found"] else "Not found"
+            size_text = f"{head['length']:,} B" if head["found"] else "–"
             st.markdown(
-                '<div class="pb-card"><div class="pb-icon">🔍</div>'
-                "<h3>Your analysis will appear here</h3>"
-                "<p>Upload a PNG and select <b>Analyse image</b>. "
-                "Two checks look for traces of LSB hiding: a header check "
-                "and RS analysis.</p></div>",
-                unsafe_allow_html=True,
-            )
-        elif not analysis_file:
-            st.error("Upload a PNG image first.")
-        else:
-            try:
-                img = load_image(analysis_file)
-                with st.spinner("Analysing image…"):
-                    head = header_check(img)
-                    rs = rs_analysis(img)
-
-                rs_flag = rs["max_rate"] >= 0.30
-
-                if head["found"]:
-                    st.error(
-                        f"PhantomBits hidden data found: a valid header announces "
-                        f"a payload of {head['length']} bytes."
-                    )
-                elif rs_flag:
-                    st.warning("Possible hidden data detected (RS analysis).")
-                else:
-                    st.success("No strong sign of hidden data.")
-
-                head_text = "Found" if head["found"] else "Not found"
-                st.markdown(
-                    f"""
-<div class="pb-stats" style="grid-template-columns: repeat(2, 1fr);">
+                f"""
+<div class="pb-stats" style="grid-template-columns: repeat(4, 1fr);">
 <div class="pb-stat"><small>Header check</small><div>{head_text}</div></div>
-<div class="pb-stat"><small>RS estimated rate</small><div>{rs["max_rate"] * 100:.1f}%</div></div>
+<div class="pb-stat"><small>Hidden payload</small><div>{size_text}</div></div>
+<div class="pb-stat"><small>RS peak (highest point)</small><div>{rs["max_rate"] * 100:.1f}%</div></div>
+<div class="pb-stat"><small>RS at 100% scanned</small><div>{final_rate * 100:.2f}%</div></div>
 </div>
 """,
-                    unsafe_allow_html=True,
-                )
-                st.caption(
-                    "Header check finds PhantomBits messages of any length. "
-                    "RS estimates how much of the image is hidden, but needs "
-                    "longer messages (about 500 characters or more)."
-                )
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                "The header check finds PhantomBits messages of any length. RS needs longer "
+                "messages (about 500 characters or more); its peak is the early, noisy part "
+                "of the curve, and the value at 100% scanned is the settled estimate."
+            )
 
-                st.markdown("**RS estimated embedding rate along the image**")
-                rs_df = pd.DataFrame(
-                    {
-                        "Image scanned (%)": [f * 100 for f in rs["fractions"]],
-                        "Estimated rate": rs["rates"],
-                    }
-                ).set_index("Image scanned (%)")
-                st.line_chart(rs_df)
+            # ---- RS chart -------------------------------------------------
+            with st.container(border=True):
+                st.markdown('<div class="pb-section">RS estimated embedding rate along the image</div>',
+                            unsafe_allow_html=True)
+                st.altair_chart(rs_chart(rs), width="stretch")
+                st.caption("Read it from the right: the flat end is the reliable estimate. "
+                           "The dashed amber line is the 0.30 detection threshold; a peak above it at the left "
+                           "means the start of the image is densely embedded.")
 
-                st.markdown("**LSB plane (red channel)**")
-                lsb = (np.array(img)[:, :, 0] & 1) * 255
-                st.image(
-                    Image.fromarray(lsb.astype(np.uint8)),
-                    caption="Noise at the top rows can mean data is hidden there.",
-                    width="stretch",
-                )
+            # ---- LSB planes -----------------------------------------------
+            with st.container(border=True):
+                st.markdown('<div class="pb-section">LSB planes (all channels)</div>',
+                            unsafe_allow_html=True)
+                planes = lsb_planes(img)
+                length = head["length"] if head["found"] else None
+                for tab, (name, plane) in zip(st.tabs(list(planes)), planes.items()):
+                    with tab:
+                        st.image(
+                            plane_view(plane, length),
+                            caption=(f"LSB plane – {name}. Red circle = hidden data "
+                                     f"({head['length']:,} bytes)." if length else
+                                     f"LSB plane – {name}. Noise at the top rows can mean data is hidden there."),
+                            width="stretch",
+                        )
+                st.caption("White = last bit is 1, black = last bit is 0. "
+                           "Random-looking noise marks where data was written.")
 
-            except Exception as e:
-                st.error(f"Analysis failed: {e}")
+        except Exception as e:
+            st.error(f"Analysis failed: {e}")
 
 elif page == "Performance Evaluation":
     page_header(
@@ -661,84 +685,75 @@ elif page == "Performance Evaluation":
         "Measure how invisible the hiding is and how well it can be detected.",
     )
 
-    left, right = st.columns([1, 1], gap="large")
-
-    with left:
-        with st.container(border=True):
-            st.markdown('<div class="pb-section">1 · Original cover image</div>', unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown('<div class="pb-section">1 · Original cover image</div>', unsafe_allow_html=True)
+        up_col, btn_col = st.columns([3, 1], gap="large", vertical_alignment="center")
+        with up_col:
             eval_file = st.file_uploader(
-                "Upload an original PNG (with nothing hidden)",
-                type=["png"],
-                key="eval_upload",
+                "Upload an original PNG (with nothing hidden)", type=["png"], key="eval_upload",
                 label_visibility="collapsed",
             )
-            st.caption("Use an original image, not one that already holds a hidden message.")
+        with btn_col:
             run_eval = st.button("Run evaluation", type="primary", width="stretch")
+        st.caption("Use an original image, not one that already holds a hidden message.")
 
-    with right:
-        if not run_eval:
+    if not run_eval:
+        st.markdown(
+            '<div class="pb-card"><div class="pb-icon">📊</div>'
+            "<h3>Your results will appear here</h3>"
+            "<p>The app hides random data in your image at 5% up to 100% of its capacity, "
+            "then measures image quality (PSNR, MSE, SSIM) and checks whether "
+            "the header check and RS analysis can detect it.</p></div>",
+            unsafe_allow_html=True,
+        )
+    elif not eval_file:
+        st.error("Upload a PNG image first.")
+    else:
+        try:
+            cover = load_image(eval_file)
+            with st.spinner("Running evaluation (this can take a little while)…"):
+                rows = evaluate_embedding(cover)
+                base = clean_baseline(cover)
+
+            st.success("Evaluation finished.")
+
+            base_text = "Not detected" if not (base["rs_detected"] or base["header_detected"]) else "Detected"
             st.markdown(
-                '<div class="pb-card"><div class="pb-icon">📊</div>'
-                "<h3>Your results will appear here</h3>"
-                "<p>The app hides random data in your image at 5% up to 100% of its capacity, "
-                "then measures image quality (PSNR, MSE, SSIM) and checks whether "
-                "the header check and RS analysis can detect it.</p></div>",
-                unsafe_allow_html=True,
-            )
-        elif not eval_file:
-            st.error("Upload a PNG image first.")
-        else:
-            try:
-                cover = load_image(eval_file)
-                with st.spinner("Running evaluation (this can take a little while)…"):
-                    rows = evaluate_embedding(cover)
-                    base = clean_baseline(cover)
-
-                st.success("Evaluation finished.")
-
-                base_text = "Not detected" if not (base["rs_detected"] or base["header_detected"]) else "Detected"
-                st.markdown(
-                    f"""
+                f"""
 <div class="pb-stats">
 <div class="pb-stat"><small>PSNR at 5% fill</small><div class="good">{rows[0]["psnr"]:.1f} dB</div></div>
 <div class="pb-stat"><small>PSNR at 100% fill</small><div>{rows[-1]["psnr"]:.1f} dB</div></div>
 <div class="pb-stat"><small>Original image</small><div>{base_text}</div></div>
 </div>
 """,
-                    unsafe_allow_html=True,
-                )
-                st.caption(
-                    "PSNR above 40 dB is usually invisible to the eye. "
-                    "SSIM close to 1 means the stego image is structurally identical."
-                )
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                "PSNR above 40 dB is usually invisible to the eye. "
+                "SSIM close to 1 means the stego image is structurally identical."
+            )
 
-                df = pd.DataFrame(rows)
-
-                st.markdown("**Results by fill level**")
-                table = pd.DataFrame(
-                    {
-                        "Fill (%)": df["fill_pct"].round(0).astype(int),
-                        "Payload (B)": df["payload_bytes"],
-                        "PSNR (dB)": df["psnr"].round(2),
-                        "MSE": df["mse"].round(4),
-                        "SSIM": df["ssim"].round(4),
-                        "RS rate (%)": df["rs_rate_pct"].round(1),
-                        "RS detected": df["rs_detected"].map({True: "Yes", False: "No"}),
-                        "Header detected": df["header_detected"].map({True: "Yes", False: "No"}),
-                    }
-                )
-                st.dataframe(table, hide_index=True, width="stretch")
-
-                st.markdown("**Image quality (PSNR) vs how full the image is**")
-                st.line_chart(df.set_index("fill_pct")[["psnr"]].rename(columns={"psnr": "PSNR (dB)"}))
-
-                st.markdown("**RS estimated rate vs how full the image is**")
-                st.line_chart(df.set_index("fill_pct")[["rs_rate_pct"]].rename(columns={"rs_rate_pct": "RS rate (%)"}))
-
+            with st.container(border=True):
+                st.markdown('<div class="pb-section">Results by fill level</div>', unsafe_allow_html=True)
+                st.dataframe(results_table(rows), hide_index=True, width="stretch")
                 st.caption(
                     f"Original image check: RS rate {base['rs_rate_pct']:.1f}%, "
                     f"header {'found' if base['header_detected'] else 'not found'}."
                 )
 
-            except Exception as e:
-                st.error(f"Evaluation failed: {e}")
+            c1, c2 = st.columns(2, gap="medium")
+            with c1:
+                with st.container(border=True):
+                    st.markdown('<div class="pb-section">Image quality (PSNR) vs fill</div>',
+                                unsafe_allow_html=True)
+                    st.altair_chart(psnr_chart(rows), width="stretch")
+                    st.caption("Higher is better. Each doubling of fill costs about 3 dB.")
+            with c2:
+                with st.container(border=True):
+                    st.markdown('<div class="pb-section">RS peak rate vs fill</div>',
+                                unsafe_allow_html=True)
+                    st.altair_chart(fill_chart(rows, "rs_rate_pct"), width="stretch")
+                    st.caption("The highest point of the RS curve for each fill level.")
+
+        except Exception as e:
+            st.error(f"Evaluation failed: {e}")

@@ -8,3 +8,8 @@ gatherUsageStats = false
 
 [client]
 toolbarMode = "minimal"
+
+[theme]
+base = "light"
+textColor = "#10231f"
+primaryColor = "#0d9488"

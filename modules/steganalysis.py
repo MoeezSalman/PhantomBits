@@ -121,12 +121,16 @@ def rs_analysis(image: Image.Image, steps: int = 12) -> dict:
     start = min(npix, 3000)
     sizes = np.unique(np.geomspace(start, npix, steps).astype(int))
     rates = []
+    channel_rates = {"Red": [], "Green": [], "Blue": []}
     for s in sizes:
         per_channel = [_rs_rate(arr[:, :, c].reshape(-1)[:s]) for c in range(3)]
+        for name, r in zip(channel_rates, per_channel):
+            channel_rates[name].append(float(r))
         rates.append(float(np.mean(per_channel)))
     return {
         "fractions": (sizes / npix).tolist(),
         "rates": rates,
+        "channel_rates": channel_rates,      # NEW: per-colour curves
         "max_rate": float(max(rates)),
     }
 
