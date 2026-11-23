@@ -5,7 +5,11 @@ Member 1: Dashboard + navigation + Encode page
 
 from __future__ import annotations
 import io
-
+import urllib.parse
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.image import MIMEImage
 import streamlit as st
 from PIL import Image, ImageDraw, ImageChops
 
@@ -22,6 +26,13 @@ from modules.visuals import (
 from modules.crypto import encrypt_message, decrypt_message
 from modules.steganography import encode_message, extract_message
 from utils.image_utils import load_image, max_payload_bytes, calculate_psnr
+
+
+# ---------------------------------------------------------------------------
+# Gmail credentials for sending stego images
+# ---------------------------------------------------------------------------
+GMAIL_USER = "moeezsalman246@gmail.com"
+GMAIL_APP_PASSWORD = "eomtjfsmhxazmsht"   # App Password
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +57,7 @@ def make_favicon() -> Image.Image:
     body = (9 * k, 19 * k, 35 * k, 39 * k)
     d.rounded_rectangle(body, radius=4 * k, fill="white")
 
-    # picture inset (sun, mountains, hidden bit), clipped to the inset shape
+    # picture inset
     inset = (12 * k, 22.5 * k, 32 * k, 35.5 * k)
     d.rounded_rectangle(inset, radius=2 * k, fill=(205, 238, 234, 255))
     layer = Image.new("RGBA", (s, s), (0, 0, 0, 0))
@@ -68,7 +79,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Sidebar logo: a padlock whose body shows a picture (image steganography)
+# Sidebar logo
 LOGO_SVG = """
 <svg viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -116,7 +127,6 @@ h1, h2, h3, h4, .pb-display {
     letter-spacing: -0.02em;
 }
 
-/* Background with soft glows */
 .stApp {
     background:
         radial-gradient(900px 500px at 85% -10%, rgba(13,148,136,.28), transparent 60%),
@@ -127,7 +137,6 @@ h1, h2, h3, h4, .pb-display {
 header[data-testid="stHeader"] { background: transparent; }
 .block-container { padding-top: 2.5rem; max-width: 1150px; }
 
-/* Sidebar */
 section[data-testid="stSidebar"] {
     background: linear-gradient(180deg, #ffffff 0%, #eef4f2 100%);
     border-right: 1px solid var(--line);
@@ -141,13 +150,7 @@ section[data-testid="stSidebar"] {
 .pb-logo svg { display:block; width:100%; height:100%; }
 .pb-brand-name { font-family:'Sora',sans-serif; font-weight:800; font-size:1.25rem; }
 .pb-tag { color: var(--muted); font-size:.85rem; margin-bottom:1.2rem; }
-.pb-team {
-    border:1px solid var(--line); border-radius:14px; padding:.9rem 1rem;
-    background: rgba(255,255,255,.7); font-size:.85rem; color:var(--muted); line-height:1.7;
-}
-.pb-team b { color: var(--mist); font-weight:600; }
 
-/* Hero */
 .pb-hero {
     position:relative; overflow:hidden;
     border:1px solid var(--line); border-radius:28px;
@@ -155,7 +158,7 @@ section[data-testid="stSidebar"] {
     background: linear-gradient(135deg, rgba(13,148,136,.16), rgba(255,255,255,.6) 55%, rgba(15,118,110,.08));
     backdrop-filter: blur(14px);
 }
-.pb-hero::after {  /* faint "hidden bits" grid */
+.pb-hero::after {
     content:""; position:absolute; inset:0; pointer-events:none;
     background-image: radial-gradient(rgba(16,35,31,.18) 1px, transparent 1.4px);
     background-size: 22px 22px;
@@ -175,7 +178,6 @@ section[data-testid="stSidebar"] {
 }
 .pb-chip i { color: var(--teal); font-style:normal; margin-right:.35rem; }
 
-/* Cards */
 .pb-card {
     height:100%;
     border:1px solid var(--line); border-radius:20px; padding:1.5rem;
@@ -190,19 +192,16 @@ section[data-testid="stSidebar"] {
 .pb-card h3 { margin:0 0 .4rem; font-size:1.15rem; }
 .pb-card p { margin:0; color:var(--muted); font-size:.95rem; line-height:1.55; }
 
-/* Pipeline */
 .pb-flow { display:grid; grid-template-columns: repeat(4, 1fr); gap:1rem; margin-top:.6rem; }
 .pb-step { border-left:2px solid var(--violet); padding:.2rem 0 .2rem 1rem; }
 .pb-step b { font-family:'Sora',sans-serif; display:block; margin-bottom:.2rem; }
 .pb-step span { color:var(--muted); font-size:.9rem; }
 @media (max-width: 800px) { .pb-flow { grid-template-columns: 1fr 1fr; } .pb-hero { padding:2rem 1.4rem; } }
 
-/* Page headers */
 .pb-head h1 { font-size:2.2rem; font-weight:800; margin:0 0 .3rem; }
 .pb-head p { color:var(--muted); margin:0 0 1.4rem; font-size:1.02rem; }
 .pb-section { font-family:'Sora',sans-serif; font-weight:700; font-size:1.05rem; margin:.2rem 0 .8rem; }
 
-/* Stat tiles */
 .pb-stats { display:grid; grid-template-columns: repeat(3, 1fr); gap:1rem; margin:1.2rem 0; }
 .pb-stat { border:1px solid var(--line); border-radius:16px; padding:1rem 1.2rem; background:rgba(255,255,255,.75); }
 .pb-stat small { color:var(--muted); font-size:.82rem; }
@@ -211,10 +210,6 @@ section[data-testid="stSidebar"] {
 .pb-bar { height:6px; border-radius:99px; background:rgba(15,60,50,.10); margin-top:.6rem; overflow:hidden; }
 .pb-bar > span { display:block; height:100%; background: linear-gradient(90deg, var(--violet), var(--pink)); }
 
-/* Native widgets */
-div[data-testid="stVerticalBlockBorderWrapper"]:has(> div > div[data-testid="stVerticalBlock"] .pb-section) {
-    border-color: var(--line);
-}
 div[data-testid="stVerticalBlockBorderWrapper"] {
     border-radius: 20px; border-color: var(--line);
     background: rgba(255,255,255,.7);
@@ -240,12 +235,10 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 div[data-testid="stImage"] img { border-radius: 16px; border: 1px solid var(--line); }
 div[data-testid="stAlert"] { border-radius: 14px; }
 
-/* ---------------- Animations ---------------- */
 @keyframes pb-rise { from { opacity:0; transform: translateY(18px); } to { opacity:1; transform:none; } }
 @keyframes pb-shift { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
 @keyframes pb-float { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(30px,-24px) scale(1.12); } }
 @keyframes pb-drift { from { background-position: 0 0; } to { background-position: 44px 44px; } }
-@keyframes pb-pulse { 0%,100% { box-shadow: 0 8px 28px rgba(13,148,136,.45); } 50% { box-shadow: 0 8px 44px rgba(245,158,11,.65); } }
 @keyframes pb-sweep { from { transform: translateX(-120%) skewX(-20deg); } to { transform: translateX(260%) skewX(-20deg); } }
 @keyframes pb-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes pb-pop { 0% { opacity:0; transform: scale(.94); } 100% { opacity:1; transform:none; } }
@@ -299,17 +292,16 @@ div[data-testid="stAlert"] { animation: pb-pop .4s ease both; }
 }
 .stButton > button[kind="primary"] p, .stDownloadButton > button p { color:#fff !important; font-weight:700; }
 
-/* ---------------- Light theme overrides ---------------- */
 :root { color-scheme: light; }
 .stApp, .stApp label, .stApp [data-testid="stWidgetLabel"] p,
 .stApp [data-testid="stCaptionContainer"], .stApp [data-testid="stImageCaption"],
 .stApp div[role="radiogroup"] label p, .stApp .pb-chip { color: var(--mist) !important; }
 .stApp .pb-card p, .stApp .pb-hero p, .stApp .pb-head p, .stApp .pb-step span,
-.stApp .pb-stat small, .stApp .pb-tag, .stApp .pb-team,
+.stApp .pb-stat small, .stApp .pb-tag,
 .stApp [data-testid="stFileUploaderDropzone"] span,
 .stApp [data-testid="stFileUploaderDropzone"] small { color: var(--muted) !important; }
 .stApp .pb-card h3, .stApp .pb-step b, .stApp .pb-section, .stApp .pb-head h1,
-.stApp .pb-brand-name, .stApp .pb-stat div, .stApp .pb-team b { color: var(--mist) !important; }
+.stApp .pb-brand-name, .stApp .pb-stat div { color: var(--mist) !important; }
 .stApp .pb-stat .good { color: var(--teal) !important; }
 .stApp .pb-hero h1 { color: transparent !important; -webkit-text-fill-color: transparent; }
 .pb-card, .pb-stat, .pb-chip { box-shadow: 0 12px 30px -20px rgba(15,60,50,.45); }
@@ -318,7 +310,6 @@ div[data-testid="stVerticalBlockBorderWrapper"] { box-shadow: 0 12px 30px -22px 
 section[data-testid="stSidebar"] { box-shadow: 8px 0 30px -24px rgba(15,60,50,.4); }
 #MainMenu, footer { visibility: hidden; }
 
-/* Tabs: always clearly visible (also when the browser is in dark mode) */
 .stApp [data-testid="stTabs"] [role="tab"],
 .stApp [data-testid="stTabs"] [role="tab"] *,
 .stApp button[data-baseweb="tab"] p { color: #10231f !important; opacity: 1 !important; font-weight: 600; }
@@ -330,7 +321,7 @@ st.markdown(CSS, unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
-# Sidebar navigation style (buttons with Material icons, no radio circles)
+# Sidebar navigation style
 # ---------------------------------------------------------------------------
 NAV_CSS = """
 <style>
@@ -352,14 +343,12 @@ section[data-testid="stSidebar"] .stButton { margin-bottom: .3rem; }
 .stApp section[data-testid="stSidebar"] .stButton > button span[data-testid="stIconMaterial"] {
     color: #5a6b66 !important; font-size: 1.35rem;
 }
-/* hover */
 .stApp section[data-testid="stSidebar"] .stButton > button:hover {
     background: rgba(13,148,136,.10) !important; border-color: var(--line) !important;
 }
 .stApp section[data-testid="stSidebar"] .stButton > button:hover span[data-testid="stIconMaterial"] {
     color: #0d9488 !important;
 }
-/* selected page = the primary button */
 .stApp section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
     background: linear-gradient(90deg, rgba(13,148,136,.28), rgba(245,158,11,.12)) !important;
     border-color: rgba(13,148,136,.5) !important;
@@ -374,7 +363,7 @@ st.markdown(NAV_CSS, unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
-# Card icons: the same clean line style as the rest of the UI (replaces emojis)
+# Card icons
 # ---------------------------------------------------------------------------
 ICON_PATHS = {
     "lock": "<rect width='18' height='11' x='3' y='11' rx='2'/><path d='M7 11V7a5 5 0 0 1 10 0v4'/>",
@@ -411,24 +400,15 @@ def page_header(title: str, subtitle: str) -> None:
     )
 
 
-def placeholder_page(title: str, subtitle: str, owner: str, extra: str = "") -> None:
-    page_header(title, subtitle)
-    st.markdown(
-        f'<div class="pb-card"><div class="pb-icon">{icon_svg("tool")}</div>'
-        f"<h3>Coming soon</h3><p>This page will be implemented by {owner}. {extra}</p></div>",
-        unsafe_allow_html=True,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Sidebar navigation
 # ---------------------------------------------------------------------------
 NAV_ITEMS = [
     ("Dashboard", ":material/dashboard:"),
     ("Encode Message", ":material/lock:"),
-    ("Decode Message", ":material/lock_open:"),          # Member 2
-    ("Image Analysis", ":material/image_search:"),       # Member 3
-    ("Performance Evaluation", ":material/bar_chart:"),  # Member 3
+    ("Decode Message", ":material/lock_open:"),
+    ("Image Analysis", ":material/image_search:"),
+    ("Performance Evaluation", ":material/bar_chart:"),
 ]
 
 with st.sidebar:
@@ -455,7 +435,6 @@ with st.sidebar:
             st.rerun()
 
     page = st.session_state.page
-
     st.markdown("<br>", unsafe_allow_html=True)
 
 
@@ -511,7 +490,7 @@ checks images for signs that someone else did the same.</p>
 
 
 # ---------------------------------------------------------------------------
-# 2. ENCODE MESSAGE  (Member 1)
+# 2. ENCODE MESSAGE
 # ---------------------------------------------------------------------------
 elif page == "Encode Message":
     page_header(
@@ -534,7 +513,7 @@ elif page == "Encode Message":
                 try:
                     preview = Image.open(uploaded)
                     st.image(preview, caption=f"{preview.width} × {preview.height} px", use_container_width=True)
-                    uploaded.seek(0)  # reset so load_image can read it again
+                    uploaded.seek(0)
                 except Exception:
                     uploaded.seek(0)
 
@@ -553,7 +532,94 @@ elif page == "Encode Message":
             go = st.button("Encrypt & hide", type="primary", use_container_width=True)
 
     with right:
-        if not go:
+        if "stego_result" in st.session_state:
+            result = st.session_state.stego_result
+
+            st.success("Message encrypted and hidden.")
+
+            st.markdown(
+                f"""
+<div class="pb-stats">
+<div class="pb-stat"><small>PSNR</small><div class="good">{result['psnr']:.2f} dB</div></div>
+<div class="pb-stat"><small>Payload</small><div>{result['payload']} B</div></div>
+<div class="pb-stat"><small>Capacity used</small><div>{result['used']:.1f}%</div>
+<div class="pb-bar"><span style="width:{min(result['used'], 100):.1f}%"></span></div></div>
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+            st.caption("PSNR above 40 dB is usually imperceptible to the eye.")
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.image(result["cover"], caption="Original", use_container_width=True)
+            with col_b:
+                st.image(result["stego"], caption="Stego image", use_container_width=True)
+
+            st.download_button(
+                label="Download stego image",
+                data=result["png_bytes"],
+                file_name="phantom_stego.png",
+                mime="image/png",
+                use_container_width=True,
+            )
+
+        # ---------- Send via Email ----------
+        st.markdown("---")
+        st.markdown("### Send the stego image")
+
+        if st.button("✉️ Email", use_container_width=True, type="primary"):
+            st.session_state.show_email_dialog = True
+
+        # ---------- Email Dialog ----------
+        @st.dialog("Send via Email")
+        def email_dialog():
+            st.markdown("Enter the recipient's Gmail address. The stego image will be sent as an attachment.")
+            receiver_email = st.text_input("Recipient Gmail", placeholder="friend@gmail.com")
+
+            col_send, col_cancel = st.columns(2)
+            with col_send:
+                if st.button("Send Image", type="primary", use_container_width=True):
+                    if not receiver_email or "@" not in receiver_email:
+                        st.error("Please enter a valid email address.")
+                    else:
+                        try:
+                            msg = MIMEMultipart()
+                            msg["From"] = GMAIL_USER
+                            msg["To"] = receiver_email
+                            msg["Subject"] = "PhantomBits – Stego Image"
+
+                            body = (
+                                "Hello,\n\n"
+                                "I've encoded a secret message inside the attached image using PhantomBits.\n"
+                                "Please use the Decode page and the password I shared with you to recover it.\n\n"
+                                "— Sent from PhantomBits"
+                            )
+                            msg.attach(MIMEText(body, "plain"))
+
+                            image_part = MIMEImage(result["png_bytes"], name="phantom_stego.png")
+                            msg.attach(image_part)
+
+                            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                                server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+                                server.send_message(msg)
+
+                            st.success(f"✅ Image successfully sent to **{receiver_email}**!")
+                            st.balloons()
+                        except Exception as e:
+                            st.error(f"Failed to send email: {e}")
+            with col_cancel:
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state.show_email_dialog = False
+                    st.rerun()
+
+        if st.session_state.get("show_email_dialog", False):
+            email_dialog()
+
+
+
+
+        elif not go:
             st.markdown(
                 f'<div class="pb-card"><div class="pb-icon">{icon_svg("image")}</div>'
                 "<h3>Your stego image will appear here</h3>"
@@ -561,73 +627,58 @@ elif page == "Encode Message":
                 "You'll see a side-by-side comparison, the quality score and a download button.</p></div>",
                 unsafe_allow_html=True,
             )
+
+    # ---------- Run encoding ----------
+    if go:
+        if not uploaded:
+            st.error("Upload a PNG image first.")
+        elif not message.strip():
+            st.error("Enter a message to hide.")
+        elif not password:
+            st.error("Enter a password.")
         else:
-            if not uploaded:
-                st.error("Upload a PNG image first.")
-            elif not message.strip():
-                st.error("Enter a message to hide.")
-            elif not password:
-                st.error("Enter a password.")
-            else:
-                try:
-                    # 1. Load image
-                    cover = load_image(uploaded)
-                    capacity = max_payload_bytes(cover)
+            try:
+                cover = load_image(uploaded)
+                capacity = max_payload_bytes(cover)
 
-                    # 2. Encrypt
-                    with st.spinner("Encrypting message…"):
-                        encrypted = encrypt_message(message, password)
+                with st.spinner("Encrypting message…"):
+                    encrypted = encrypt_message(message, password)
 
-                    if len(encrypted) > capacity:
-                        st.error(
-                            f"Encrypted payload is too large for this image.\n\n"
-                            f"Payload size: **{len(encrypted)}** bytes\n\n"
-                            f"Image capacity: **{capacity}** bytes\n\n"
-                            "Use a larger image or a shorter message."
-                        )
-                    else:
-                        # 3. Embed
-                        with st.spinner("Embedding data into image…"):
-                            stego = encode_message(cover, encrypted)
+                if len(encrypted) > capacity:
+                    st.error(
+                        f"Encrypted payload is too large for this image.\n\n"
+                        f"Payload size: **{len(encrypted)}** bytes\n\n"
+                        f"Image capacity: **{capacity}** bytes\n\n"
+                        "Use a larger image or a shorter message."
+                    )
+                else:
+                    with st.spinner("Embedding data into image…"):
+                        stego = encode_message(cover, encrypted)
 
-                        st.success("Message encrypted and hidden.")
+                    psnr = calculate_psnr(cover, stego)
+                    used = 100 * len(encrypted) / capacity
 
-                        # 4. Results
-                        psnr = calculate_psnr(cover, stego)
-                        used = 100 * len(encrypted) / capacity
-                        st.markdown(
-                            f"""
-<div class="pb-stats">
-<div class="pb-stat"><small>PSNR</small><div class="good">{psnr:.2f} dB</div></div>
-<div class="pb-stat"><small>Payload</small><div>{len(encrypted)} B</div></div>
-<div class="pb-stat"><small>Capacity used</small><div>{used:.1f}%</div>
-<div class="pb-bar"><span style="width:{min(used, 100):.1f}%"></span></div></div>
-</div>
-""",
-                            unsafe_allow_html=True,
-                        )
-                        st.caption("PSNR above 40 dB is usually imperceptible to the eye.")
+                    buf = io.BytesIO()
+                    stego.save(buf, format="PNG")
+                    png_bytes = buf.getvalue()
 
-                        col_a, col_b = st.columns(2)
-                        with col_a:
-                            st.image(cover, caption="Original", use_container_width=True)
-                        with col_b:
-                            st.image(stego, caption="Stego image", use_container_width=True)
+                    st.session_state.stego_result = {
+                        "cover": cover,
+                        "stego": stego,
+                        "psnr": psnr,
+                        "payload": len(encrypted),
+                        "used": used,
+                        "png_bytes": png_bytes,
+                    }
+                    st.rerun()
 
-                        buf = io.BytesIO()
-                        stego.save(buf, format="PNG")
-                        st.download_button(
-                            label="Download stego image",
-                            data=buf.getvalue(),
-                            file_name="phantom_stego.png",
-                            mime="image/png",
-                            use_container_width=True,
-                        )
-
-                except Exception as e:
-                    st.error(f"Encoding failed: {e}")
+            except Exception as e:
+                st.error(f"Encoding failed: {e}")
 
 
+# ---------------------------------------------------------------------------
+# 3. DECODE MESSAGE
+# ---------------------------------------------------------------------------
 elif page == "Decode Message":
     page_header(
         "Decode message",
@@ -678,20 +729,16 @@ elif page == "Decode Message":
                 st.error("Enter the password.")
             else:
                 try:
-                    # 1. Load image
                     stego = load_image(uploaded)
 
-                    # 2. Extract encrypted payload
                     with st.spinner("Extracting hidden payload…"):
                         encrypted = extract_message(stego)
 
                     st.info(f"Extracted encrypted payload: **{len(encrypted)}** bytes")
 
-                    # 3. Decrypt + integrity check
                     with st.spinner("Decrypting (AES-GCM)…"):
                         message = decrypt_message(encrypted, password)
 
-                    # 4. Success
                     st.success("Message successfully recovered and verified.")
                     st.markdown("### Original message")
                     st.code(message, language=None)
@@ -702,6 +749,10 @@ elif page == "Decode Message":
                 except Exception as e:
                     st.error(f"Extraction / decryption error: {e}")
 
+
+# ---------------------------------------------------------------------------
+# 4. IMAGE ANALYSIS
+# ---------------------------------------------------------------------------
 elif page == "Image Analysis":
     page_header(
         "Image analysis",
@@ -740,7 +791,6 @@ elif page == "Image Analysis":
             rs_flag = rs["max_rate"] >= 0.30
             final_rate = rs["rates"][-1]
 
-            # ---- verdict --------------------------------------------------
             if head["found"]:
                 st.error(
                     f"PhantomBits hidden data found: a valid header announces "
@@ -751,7 +801,6 @@ elif page == "Image Analysis":
             else:
                 st.success("No strong sign of hidden data.")
 
-            # ---- stat tiles -----------------------------------------------
             head_text = "Found" if head["found"] else "Not found"
             size_text = f"{head['length']:,} B" if head["found"] else "–"
             st.markdown(
@@ -771,16 +820,13 @@ elif page == "Image Analysis":
                 "of the curve, and the value at 100% scanned is the settled estimate."
             )
 
-            # ---- RS chart -------------------------------------------------
             with st.container(border=True):
                 st.markdown('<div class="pb-section">RS estimated embedding rate along the image</div>',
                             unsafe_allow_html=True)
                 st.altair_chart(rs_chart(rs), width="stretch")
                 st.caption("Read it from the right: the flat end is the reliable estimate. "
-                           "The dashed amber line is the 0.30 detection threshold; a peak above it at the left "
-                           "means the start of the image is densely embedded.")
+                           "The dashed amber line is the 0.30 detection threshold.")
 
-            # ---- LSB planes -----------------------------------------------
             with st.container(border=True):
                 st.markdown('<div class="pb-section">LSB planes (all channels)</div>',
                             unsafe_allow_html=True)
@@ -792,15 +838,17 @@ elif page == "Image Analysis":
                             plane_view(plane, length),
                             caption=(f"LSB plane – {name}. Red circle = hidden data "
                                      f"({head['length']:,} bytes)." if length else
-                                     f"LSB plane – {name}. Noise at the top rows can mean data is hidden there."),
+                                     f"LSB plane – {name}."),
                             width="stretch",
                         )
-                st.caption("White = last bit is 1, black = last bit is 0. "
-                           "Random-looking noise marks where data was written.")
 
         except Exception as e:
             st.error(f"Analysis failed: {e}")
 
+
+# ---------------------------------------------------------------------------
+# 5. PERFORMANCE EVALUATION
+# ---------------------------------------------------------------------------
 elif page == "Performance Evaluation":
     page_header(
         "Performance evaluation",
@@ -850,18 +898,10 @@ elif page == "Performance Evaluation":
 """,
                 unsafe_allow_html=True,
             )
-            st.caption(
-                "PSNR above 40 dB is usually invisible to the eye. "
-                "SSIM close to 1 means the stego image is structurally identical."
-            )
 
             with st.container(border=True):
                 st.markdown('<div class="pb-section">Results by fill level</div>', unsafe_allow_html=True)
                 st.dataframe(results_table(rows), hide_index=True, width="stretch")
-                st.caption(
-                    f"Original image check: RS rate {base['rs_rate_pct']:.1f}%, "
-                    f"header {'found' if base['header_detected'] else 'not found'}."
-                )
 
             c1, c2 = st.columns(2, gap="medium")
             with c1:
@@ -869,13 +909,11 @@ elif page == "Performance Evaluation":
                     st.markdown('<div class="pb-section">Image quality (PSNR) vs fill</div>',
                                 unsafe_allow_html=True)
                     st.altair_chart(psnr_chart(rows), width="stretch")
-                    st.caption("Higher is better. Each doubling of fill costs about 3 dB.")
             with c2:
                 with st.container(border=True):
                     st.markdown('<div class="pb-section">RS peak rate vs fill</div>',
                                 unsafe_allow_html=True)
                     st.altair_chart(fill_chart(rows, "rs_rate_pct"), width="stretch")
-                    st.caption("The highest point of the RS curve for each fill level.")
 
         except Exception as e:
             st.error(f"Evaluation failed: {e}")
