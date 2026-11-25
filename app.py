@@ -21,6 +21,16 @@ from modules.visuals import (
     lsb_planes, plane_view, results_table,
     rs_chart, psnr_chart, fill_chart,
 )
+from modules.auth_db import (
+    create_user,
+    authenticate,
+    generate_rsa_keypair,
+    search_users_by_gmail,
+    get_user_by_gmail,
+    encrypt_with_public_key,
+    decrypt_with_private_key,
+)
+import base64
 
 # Our modules
 from modules.crypto import encrypt_message, decrypt_message
@@ -78,6 +88,71 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+# ---------------------------------------------------------------------------
+# Authentication gate
+# ---------------------------------------------------------------------------
+if "user" not in st.session_state:
+    st.session_state.user = None          # will hold the MongoDB user doc
+if "private_key" not in st.session_state:
+    st.session_state.private_key = None   # only kept in memory / after download
+
+# Show login / register if not authenticated
+if st.session_state.user is None:
+    st.markdown("## PhantomBits – Login / Register")
+    tab_login, tab_register = st.tabs(["Login", "Create Account"])
+
+    with tab_login:
+        gmail = st.text_input("Gmail", key="login_gmail")
+        password = st.text_input("Password", type="password", key="login_pw")
+        if st.button("Login", type="primary"):
+            user = authenticate(gmail, password)
+            if user:
+                st.session_state.user = user
+                st.success("Logged in successfully!")
+                st.rerun()
+            else:
+                st.error("Invalid Gmail or password.")
+
+    with tab_register:
+        gmail = st.text_input("Gmail", key="reg_gmail")
+        password = st.text_input("Password", type="password", key="reg_pw")
+        password2 = st.text_input("Confirm Password", type="password", key="reg_pw2")
+
+        if st.button("Create Account & Generate Keys", type="primary"):
+            if not gmail or "@" not in gmail:
+                st.error("Enter a valid Gmail.")
+            elif password != password2:
+                st.error("Passwords do not match.")
+            elif len(password) < 6:
+                st.error("Password must be at least 6 characters.")
+            else:
+                try:
+                    public_pem, private_pem = generate_rsa_keypair()
+                    user = create_user(gmail, password, public_pem)
+
+                    # Keep private key only in session for immediate download
+                    st.session_state.private_key = private_pem
+                    st.session_state.user = user
+
+                    st.success("Account created! Download your private key now.")
+                    st.download_button(
+                        label="⬇️ Download Private Key (.txt)",
+                        data=private_pem,
+                        file_name=f"phantombits_private_key_{gmail.split('@')[0]}.txt",
+                        mime="text/plain",
+                    )
+                    st.warning(
+                        "⚠️ The private key is **NOT** stored on the server. "
+                        "If you lose this file you will never be able to decrypt messages sent to you."
+                    )
+                    st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
+                except Exception as e:
+                    st.error(f"Registration failed: {e}")
+
+    st.stop()   # IMPORTANT: stop the rest of the app until logged in
+
 
 # Sidebar logo
 LOGO_SVG = """
@@ -419,6 +494,19 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
+    # Logged-in user info
+    if st.session_state.user:
+        st.markdown(
+            f"<div style='font-size:0.85rem;color:#5a6b66;margin-bottom:8px;'>"
+            f"Logged in as<br><b>{st.session_state.user['gmail']}</b></div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Logout", use_container_width=True):
+            st.session_state.user = None
+            st.session_state.private_key = None
+            st.session_state.pop("stego_result", None)
+            st.rerun()
+
     if "page" not in st.session_state:
         st.session_state.page = "Dashboard"
 
@@ -459,7 +547,28 @@ checks images for signs that someone else did the same.</p>
 """,
         unsafe_allow_html=True,
     )
+# ---- Key display ----
+    st.markdown('<div class="pb-section">Your cryptographic keys</div>', unsafe_allow_html=True)
 
+    user = st.session_state.user
+    st.markdown("**Public Key** (stored on server – used by others to encrypt passwords for you)")
+    st.code(user["public_key"], language="text")
+
+    st.markdown("**Private Key**")
+    if st.session_state.private_key:
+        st.code(st.session_state.private_key, language="text")
+        st.download_button(
+            "Download Private Key again",
+            data=st.session_state.private_key,
+            file_name="phantombits_private_key.txt",
+            mime="text/plain",
+        )
+    else:
+        st.info(
+            "Private key is not stored on the server. "
+            "If you still have the .txt file you downloaded at registration, keep it safe. "
+            "You will need it on the Decode page."
+        )
     c1, c2, c3 = st.columns(3, gap="medium")
     cards = [
         ("lock", "Encode", "Encrypt a message with a password and hide it inside an image."),
@@ -495,12 +604,13 @@ checks images for signs that someone else did the same.</p>
 elif page == "Encode Message":
     page_header(
         "Encode message",
-        "Encrypt a message with AES-GCM and hide it inside a PNG image using LSB steganography.",
+        "Encrypt a message with AES-GCM, hide it in a PNG, and encrypt the password with the recipient's public key.",
     )
 
     left, right = st.columns([1, 1], gap="large")
 
     with left:
+        # 1. Cover image
         with st.container(border=True):
             st.markdown('<div class="pb-section">1 · Cover image</div>', unsafe_allow_html=True)
             uploaded = st.file_uploader(
@@ -517,17 +627,39 @@ elif page == "Encode Message":
                 except Exception:
                     uploaded.seek(0)
 
+        # 2. Recipient search
         with st.container(border=True):
-            st.markdown('<div class="pb-section">2 · Secret & password</div>', unsafe_allow_html=True)
+            st.markdown('<div class="pb-section">2 · Recipient</div>', unsafe_allow_html=True)
+            search_q = st.text_input("Search user by Gmail", placeholder="type part of gmail…")
+            selected_user = None
+
+            if search_q:
+                results = search_users_by_gmail(search_q)
+                if results:
+                    options = {r["gmail"]: r for r in results}
+                    choice = st.selectbox("Select recipient", list(options.keys()))
+                    selected_user = options[choice]
+                    st.text_area(
+                        "Recipient Public Key (read-only)",
+                        value=selected_user["public_key"],
+                        height=140,
+                        disabled=True,
+                    )
+                else:
+                    st.info("No users found matching that Gmail.")
+
+        # 3. Secret & password
+        with st.container(border=True):
+            st.markdown('<div class="pb-section">3 · Secret & password</div>', unsafe_allow_html=True)
             message = st.text_area(
                 "Secret message",
                 height=130,
                 placeholder="Type the confidential text you want to hide…",
             )
             password = st.text_input(
-                "Password",
+                "Password (will be encrypted with recipient’s public key)",
                 type="password",
-                help="This password is used to derive the AES key. Never share it.",
+                help="This password is used for AES. It will be encrypted with the selected user's public key before sending.",
             )
             go = st.button("Encrypt & hide", type="primary", use_container_width=True)
 
@@ -564,67 +696,76 @@ elif page == "Encode Message":
                 use_container_width=True,
             )
 
-        # ---------- Send via Email ----------
-        st.markdown("---")
-        st.markdown("### Send the stego image")
+            # ---------- Send via Email ----------
+            st.markdown("---")
+            st.markdown("### Send the stego image + encrypted password")
 
-        if st.button("✉️ Email", use_container_width=True, type="primary"):
-            st.session_state.show_email_dialog = True
+            if st.button("✉️ Email to recipient", use_container_width=True, type="primary"):
+                st.session_state.show_email_dialog = True
 
-        # ---------- Email Dialog ----------
-        @st.dialog("Send via Email")
-        def email_dialog():
-            st.markdown("Enter the recipient's Gmail address. The stego image will be sent as an attachment.")
-            receiver_email = st.text_input("Recipient Gmail", placeholder="friend@gmail.com")
+            @st.dialog("Send via Email")
+            def email_dialog():
+                default_email = result.get("recipient_gmail", "")
+                st.markdown(
+                    "The stego image and the **encrypted password** will be sent to the selected user."
+                )
+                receiver_email = st.text_input(
+                    "Recipient Gmail",
+                    value=default_email,
+                    placeholder="friend@gmail.com",
+                )
 
-            col_send, col_cancel = st.columns(2)
-            with col_send:
-                if st.button("Send Image", type="primary", use_container_width=True):
-                    if not receiver_email or "@" not in receiver_email:
-                        st.error("Please enter a valid email address.")
-                    else:
-                        try:
-                            msg = MIMEMultipart()
-                            msg["From"] = GMAIL_USER
-                            msg["To"] = receiver_email
-                            msg["Subject"] = "PhantomBits – Stego Image"
+                col_send, col_cancel = st.columns(2)
+                with col_send:
+                    if st.button("Send Image", type="primary", use_container_width=True):
+                        if not receiver_email or "@" not in receiver_email:
+                            st.error("Please enter a valid email address.")
+                        else:
+                            try:
+                                msg = MIMEMultipart()
+                                msg["From"] = GMAIL_USER
+                                msg["To"] = receiver_email
+                                msg["Subject"] = "PhantomBits – Stego Image + Encrypted Password"
 
-                            body = (
-                                "Hello,\n\n"
-                                "I've encoded a secret message inside the attached image using PhantomBits.\n"
-                                "Please use the Decode page and the password I shared with you to recover it.\n\n"
-                                "— Sent from PhantomBits"
-                            )
-                            msg.attach(MIMEText(body, "plain"))
+                                body = (
+                                    "Hello,\n\n"
+                                    "I've encoded a secret message inside the attached image using PhantomBits.\n\n"
+                                    "ENCRYPTED PASSWORD (copy this and paste it on the Decode page):\n"
+                                    f"{result.get('encrypted_password_b64', '')}\n\n"
+                                    "On the Decode page:\n"
+                                    "1. Upload this image\n"
+                                    "2. Upload / paste your private key\n"
+                                    "3. Paste the encrypted password above\n"
+                                    "4. Click Extract & decrypt\n\n"
+                                    "— Sent from PhantomBits"
+                                )
+                                msg.attach(MIMEText(body, "plain"))
 
-                            image_part = MIMEImage(result["png_bytes"], name="phantom_stego.png")
-                            msg.attach(image_part)
+                                image_part = MIMEImage(result["png_bytes"], name="phantom_stego.png")
+                                msg.attach(image_part)
 
-                            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-                                server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-                                server.send_message(msg)
+                                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                                    server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+                                    server.send_message(msg)
 
-                            st.success(f"✅ Image successfully sent to **{receiver_email}**!")
-                            st.balloons()
-                        except Exception as e:
-                            st.error(f"Failed to send email: {e}")
-            with col_cancel:
-                if st.button("Cancel", use_container_width=True):
-                    st.session_state.show_email_dialog = False
-                    st.rerun()
+                                st.success(f"✅ Image + encrypted password sent to **{receiver_email}**!")
+                                st.balloons()
+                            except Exception as e:
+                                st.error(f"Failed to send email: {e}")
+                with col_cancel:
+                    if st.button("Cancel", use_container_width=True):
+                        st.session_state.show_email_dialog = False
+                        st.rerun()
 
-        if st.session_state.get("show_email_dialog", False):
-            email_dialog()
-
-
-
+            if st.session_state.get("show_email_dialog", False):
+                email_dialog()
 
         elif not go:
             st.markdown(
                 f'<div class="pb-card"><div class="pb-icon">{icon_svg("image")}</div>'
                 "<h3>Your stego image will appear here</h3>"
-                "<p>Add a PNG, a message and a password, then select <b>Encrypt &amp; hide</b>. "
-                "You'll see a side-by-side comparison, the quality score and a download button.</p></div>",
+                "<p>Select a recipient, add a PNG, a message and a password, then click "
+                "<b>Encrypt &amp; hide</b>.</p></div>",
                 unsafe_allow_html=True,
             )
 
@@ -632,6 +773,8 @@ elif page == "Encode Message":
     if go:
         if not uploaded:
             st.error("Upload a PNG image first.")
+        elif not selected_user:
+            st.error("Please search and select a recipient first.")
         elif not message.strip():
             st.error("Enter a message to hide.")
         elif not password:
@@ -655,6 +798,10 @@ elif page == "Encode Message":
                     with st.spinner("Embedding data into image…"):
                         stego = encode_message(cover, encrypted)
 
+                    # Encrypt the AES password with recipient's public key
+                    encrypted_pw = encrypt_with_public_key(password, selected_user["public_key"])
+                    encrypted_pw_b64 = base64.b64encode(encrypted_pw).decode()
+
                     psnr = calculate_psnr(cover, stego)
                     used = 100 * len(encrypted) / capacity
 
@@ -669,11 +816,14 @@ elif page == "Encode Message":
                         "payload": len(encrypted),
                         "used": used,
                         "png_bytes": png_bytes,
+                        "encrypted_password_b64": encrypted_pw_b64,
+                        "recipient_gmail": selected_user["gmail"],
                     }
                     st.rerun()
 
             except Exception as e:
                 st.error(f"Encoding failed: {e}")
+    
 
 
 # ---------------------------------------------------------------------------
@@ -682,12 +832,13 @@ elif page == "Encode Message":
 elif page == "Decode Message":
     page_header(
         "Decode message",
-        "Extract the hidden payload from a stego PNG and decrypt it with AES-GCM.",
+        "Upload the stego image, your private key, and the encrypted password to recover the secret.",
     )
 
     left, right = st.columns([1, 1], gap="large")
 
     with left:
+        # 1. Stego image
         with st.container(border=True):
             st.markdown('<div class="pb-section">1 · Stego image</div>', unsafe_allow_html=True)
             uploaded = st.file_uploader(
@@ -704,13 +855,35 @@ elif page == "Decode Message":
                 except Exception:
                     uploaded.seek(0)
 
+        # 2. Encrypted password (from the email)
         with st.container(border=True):
-            st.markdown('<div class="pb-section">2 · Password</div>', unsafe_allow_html=True)
-            password = st.text_input(
-                "Password used during encoding",
-                type="password",
-                help="Must be exactly the same password that was used to encrypt the message.",
+            st.markdown('<div class="pb-section">2 · Encrypted password</div>', unsafe_allow_html=True)
+            encrypted_pw_b64 = st.text_input(
+                "Encrypted password (from the email)",
+                placeholder="Paste the long base64 string that was sent with the image",
+                help="This was encrypted with your public key. Only your private key can decrypt it.",
             )
+
+        # 3. Private key
+        with st.container(border=True):
+            st.markdown('<div class="pb-section">3 · Your Private Key</div>', unsafe_allow_html=True)
+            private_key_file = st.file_uploader(
+                "Upload your private key (.txt)",
+                type=["txt"],
+                help="The private key file you downloaded when you created your account.",
+            )
+            private_key_text = st.text_area(
+                "Or paste private key here",
+                height=150,
+                placeholder="-----BEGIN PRIVATE KEY-----\n...",
+            )
+
+            # Prefer uploaded file
+            if private_key_file is not None:
+                private_key_pem = private_key_file.read().decode()
+            else:
+                private_key_pem = private_key_text.strip()
+
             go = st.button("Extract & decrypt", type="primary", use_container_width=True)
 
     with right:
@@ -718,37 +891,46 @@ elif page == "Decode Message":
             st.markdown(
                 f'<div class="pb-card"><div class="pb-icon">{icon_svg("unlock")}</div>'
                 "<h3>Decrypted message will appear here</h3>"
-                "<p>Upload the stego PNG, enter the correct password, then click "
-                "<b>Extract &amp; decrypt</b>.</p></div>",
+                "<p>Upload the stego PNG, paste the encrypted password from the email, "
+                "and provide your private key, then click <b>Extract &amp; decrypt</b>.</p></div>",
                 unsafe_allow_html=True,
             )
         else:
             if not uploaded:
                 st.error("Upload a stego PNG first.")
-            elif not password:
-                st.error("Enter the password.")
+            elif not encrypted_pw_b64:
+                st.error("Paste the encrypted password that was sent in the email.")
+            elif not private_key_pem:
+                st.error("Upload or paste your private key.")
             else:
                 try:
-                    stego = load_image(uploaded)
+                    # Step 1: Decrypt the AES password using private key
+                    with st.spinner("Decrypting password with private key…"):
+                        encrypted_pw = base64.b64decode(encrypted_pw_b64)
+                        real_password = decrypt_with_private_key(encrypted_pw, private_key_pem)
 
+                    # Step 2: Extract the hidden payload from the image
+                    stego = load_image(uploaded)
                     with st.spinner("Extracting hidden payload…"):
                         encrypted = extract_message(stego)
 
                     st.info(f"Extracted encrypted payload: **{len(encrypted)}** bytes")
 
-                    with st.spinner("Decrypting (AES-GCM)…"):
-                        message = decrypt_message(encrypted, password)
+                    # Step 3: Decrypt the message with the recovered AES password
+                    with st.spinner("Decrypting message (AES-GCM)…"):
+                        message = decrypt_message(encrypted, real_password)
 
                     st.success("Message successfully recovered and verified.")
                     st.markdown("### Original message")
                     st.code(message, language=None)
 
                 except ValueError as e:
-                    st.error(f"{e}")
-                    st.caption("Most common causes: wrong password or the image was modified.")
+                    # This catches both wrong private key and wrong AES password / corrupted data
+                    st.error("Password is wrong (or private key is incorrect).")
+                    st.caption(str(e))
                 except Exception as e:
                     st.error(f"Extraction / decryption error: {e}")
-
+    
 
 # ---------------------------------------------------------------------------
 # 4. IMAGE ANALYSIS
