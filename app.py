@@ -396,6 +396,33 @@ section[data-testid="stSidebar"] .stButton { margin-bottom: .3rem; }
 .stApp section[data-testid="stSidebar"] .stButton > button[kind="primary"] span[data-testid="stIconMaterial"] {
     color: #0d9488 !important;
 }
+
+/* Logout button */
+.stApp section[data-testid="stSidebar"] .st-key-logout_container div[data-testid="stButton"] > button[kind="primary"] {
+    background: #0f766e !important;
+    background-color: #0f766e !important;
+    border: 1px solid #0f766e !important;
+    color: #ffffff !important;
+    box-shadow: none !important;
+}
+
+/* Logout text */
+.stApp section[data-testid="stSidebar"] .st-key-logout_container div[data-testid="stButton"] > button p {
+    color: #ffffff !important;
+}
+
+/* Logout icon */
+.stApp section[data-testid="stSidebar"] .st-key-logout_container div[data-testid="stButton"] > button span[data-testid="stIconMaterial"] {
+    color: #ffffff !important;
+}
+
+/* Hover */
+.stApp section[data-testid="stSidebar"] .st-key-logout_container div[data-testid="stButton"] > button:hover {
+    background: #0d6b64 !important;
+    background-color: #0d6b64 !important;
+    border-color: #0d6b64 !important;
+}
+
 </style>
 """
 st.markdown(NAV_CSS, unsafe_allow_html=True)
@@ -458,19 +485,6 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    # Logged-in user info
-    if st.session_state.user:
-        st.markdown(
-            f"<div style='font-size:0.85rem;color:#5a6b66;margin-bottom:8px;'>"
-            f"Logged in as<br><b>{st.session_state.user['gmail']}</b></div>",
-            unsafe_allow_html=True,
-        )
-        if st.button("Logout", use_container_width=True):
-            st.session_state.user = None
-            st.session_state.private_key = None
-            st.session_state.pop("stego_result", None)
-            st.rerun()
-
     if "page" not in st.session_state:
         st.session_state.page = "Dashboard"
 
@@ -488,6 +502,26 @@ with st.sidebar:
 
     page = st.session_state.page
     st.markdown("<br>", unsafe_allow_html=True)
+
+# Logged-in user info
+    if st.session_state.user:
+        st.markdown(
+            f"<div style='font-size:0.85rem;color:#5a6b66;margin-bottom:8px;'>"
+            f"Logged in as<br><b>{st.session_state.user['gmail']}</b></div>",
+            unsafe_allow_html=True,
+        )
+    with st.container(key="logout_container"):
+        if st.button(
+            "Logout",
+            icon=":material/logout:",
+            type="primary",
+            use_container_width=True,
+            key="logout_button",
+        ):
+            st.session_state.user = None
+            st.session_state.private_key = None
+            st.session_state.pop("stego_result", None)
+            st.rerun()
 
 
 # ---------------------------------------------------------------------------
