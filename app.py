@@ -483,6 +483,7 @@ NAV_ITEMS = [
     ("Dashboard", ":material/dashboard:"),
     ("Encode Message", ":material/lock:"),
     ("Decode Message", ":material/lock_open:"),
+    ("Manage Keys", ":material/key:"),
     ("Image Analysis", ":material/image_search:"),
     ("Performance Evaluation", ":material/bar_chart:"),
 ]
@@ -555,28 +556,7 @@ checks images for signs that someone else did the same.</p>
 """,
         unsafe_allow_html=True,
     )
-# ---- Key display ----
-    st.markdown('<div class="pb-section">Your cryptographic keys</div>', unsafe_allow_html=True)
 
-    user = st.session_state.user
-    st.markdown("**Public Key** (stored on server – used by others to encrypt passwords for you)")
-    st.code(user["public_key"], language="text")
-
-    st.markdown("**Private Key**")
-    if st.session_state.private_key:
-        st.code(st.session_state.private_key, language="text")
-        st.download_button(
-            "Download Private Key again",
-            data=st.session_state.private_key,
-            file_name="phantombits_private_key.txt",
-            mime="text/plain",
-        )
-    else:
-        st.info(
-            "Private key is not stored on the server. "
-            "If you still have the .txt file you downloaded at registration, keep it safe. "
-            "You will need it on the Decode page."
-        )
     c1, c2, c3 = st.columns(3, gap="medium")
     cards = [
         ("lock", "Encode", "Encrypt a message with a password and hide it inside an image."),
@@ -944,6 +924,59 @@ elif page == "Decode Message":
                 except Exception as e:
                     st.error(f"Extraction / decryption error: {e}")
     
+# ---------------------------------------------------------------------------
+# MY KEYS
+# ---------------------------------------------------------------------------
+elif page == "Manage Keys":
+    page_header(
+        "Manage keys",
+        "Your RSA key pair. Share the public key, and keep the private key to yourself.",
+    )
+
+    user = st.session_state.user
+    username = user["gmail"].split("@")[0]
+
+    # Public key
+    with st.container(border=True):
+        st.markdown('<div class="pb-section">Public key</div>', unsafe_allow_html=True)
+        st.caption("Stored on the server. Other users use it to encrypt passwords for you.")
+
+        st.code(user["public_key"], language="text")
+
+        st.download_button(
+            "Download public key",
+            data=user["public_key"],
+            file_name=f"phantombits_public_key_{username}.txt",
+            mime="text/plain",
+            key="dl_public_key",
+        )
+
+    # Private key
+    with st.container(border=True):
+        st.markdown('<div class="pb-section">Private key</div>', unsafe_allow_html=True)
+        st.caption("Not stored on the server. You need it on the Decode page to read messages sent to you.")
+
+        if st.session_state.private_key:
+            st.code(st.session_state.private_key, language="text")
+
+            st.download_button(
+                "Download private key",
+                data=st.session_state.private_key,
+                file_name=f"phantombits_private_key_{username}.txt",
+                mime="text/plain",
+                key="dl_private_key",
+            )
+
+            st.warning(
+                "This key is only kept in this session. Download it now. "
+                "If you lose it, messages sent to you can never be decrypted."
+            )
+        else:
+            st.info(
+                "Your private key isn't available in this session. "
+                "Use the .txt file you downloaded when you created your account, "
+                "and keep it somewhere safe."
+            )
 
 # ---------------------------------------------------------------------------
 # 4. IMAGE ANALYSIS
