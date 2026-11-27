@@ -11,6 +11,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
 import streamlit as st
+from auth_page import render_auth_page
 from PIL import Image, ImageDraw, ImageChops
 
 import numpy as np
@@ -22,9 +23,6 @@ from modules.visuals import (
     rs_chart, psnr_chart, fill_chart,
 )
 from modules.auth_db import (
-    create_user,
-    authenticate,
-    generate_rsa_keypair,
     search_users_by_gmail,
     get_user_by_gmail,
     encrypt_with_public_key,
@@ -41,8 +39,8 @@ from utils.image_utils import load_image, max_payload_bytes, calculate_psnr
 # ---------------------------------------------------------------------------
 # Gmail credentials for sending stego images
 # ---------------------------------------------------------------------------
-GMAIL_USER = "moeezsalman246@gmail.com"
-GMAIL_APP_PASSWORD = "eomtjfsmhxazmsht"   # App Password
+GMAIL_USER = st.secrets["GMAIL_USER"]
+GMAIL_APP_PASSWORD = st.secrets["GMAIL_APP_PASSWORD"]
 
 
 # ---------------------------------------------------------------------------
@@ -88,71 +86,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-# ---------------------------------------------------------------------------
-# Authentication gate
-# ---------------------------------------------------------------------------
-if "user" not in st.session_state:
-    st.session_state.user = None          # will hold the MongoDB user doc
-if "private_key" not in st.session_state:
-    st.session_state.private_key = None   # only kept in memory / after download
-
-# Show login / register if not authenticated
-if st.session_state.user is None:
-    st.markdown("## PhantomBits – Login / Register")
-    tab_login, tab_register = st.tabs(["Login", "Create Account"])
-
-    with tab_login:
-        gmail = st.text_input("Gmail", key="login_gmail")
-        password = st.text_input("Password", type="password", key="login_pw")
-        if st.button("Login", type="primary"):
-            user = authenticate(gmail, password)
-            if user:
-                st.session_state.user = user
-                st.success("Logged in successfully!")
-                st.rerun()
-            else:
-                st.error("Invalid Gmail or password.")
-
-    with tab_register:
-        gmail = st.text_input("Gmail", key="reg_gmail")
-        password = st.text_input("Password", type="password", key="reg_pw")
-        password2 = st.text_input("Confirm Password", type="password", key="reg_pw2")
-
-        if st.button("Create Account & Generate Keys", type="primary"):
-            if not gmail or "@" not in gmail:
-                st.error("Enter a valid Gmail.")
-            elif password != password2:
-                st.error("Passwords do not match.")
-            elif len(password) < 6:
-                st.error("Password must be at least 6 characters.")
-            else:
-                try:
-                    public_pem, private_pem = generate_rsa_keypair()
-                    user = create_user(gmail, password, public_pem)
-
-                    # Keep private key only in session for immediate download
-                    st.session_state.private_key = private_pem
-                    st.session_state.user = user
-
-                    st.success("Account created! Download your private key now.")
-                    st.download_button(
-                        label="⬇️ Download Private Key (.txt)",
-                        data=private_pem,
-                        file_name=f"phantombits_private_key_{gmail.split('@')[0]}.txt",
-                        mime="text/plain",
-                    )
-                    st.warning(
-                        "⚠️ The private key is **NOT** stored on the server. "
-                        "If you lose this file you will never be able to decrypt messages sent to you."
-                    )
-                    st.rerun()
-                except ValueError as e:
-                    st.error(str(e))
-                except Exception as e:
-                    st.error(f"Registration failed: {e}")
-
-    st.stop()   # IMPORTANT: stop the rest of the app until logged in
-
 
 # Sidebar logo
 LOGO_SVG = """
@@ -174,6 +107,18 @@ LOGO_SVG = """
   <rect x="28.2" y="23.8" width="2.6" height="2.6" rx=".4" fill="#f59e0b"/>
 </svg>
 """
+
+# ---------------------------------------------------------------------------
+# Authentication gate
+# ---------------------------------------------------------------------------
+if "user" not in st.session_state:
+    st.session_state.user = None          # will hold the MongoDB user doc
+if "private_key" not in st.session_state:
+    st.session_state.private_key = None   # only kept in memory / after download
+
+if st.session_state.user is None:
+    render_auth_page(LOGO_SVG)
+    st.stop()
 
 # ---------------------------------------------------------------------------
 # Theme (CSS)
