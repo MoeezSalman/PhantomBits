@@ -11,7 +11,10 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
+
 import streamlit as st
+from streamlit_searchbox import st_searchbox
+
 from auth_page import render_auth_page
 from PIL import Image, ImageDraw, ImageChops
 
@@ -465,6 +468,13 @@ def page_header(title: str, subtitle: str) -> None:
         unsafe_allow_html=True,
     )
 
+def search_recipient_gmails(term: str) -> list[str]:
+    """Called on every keystroke by the searchbox."""
+    if not term:
+        return []
+
+    return [r["gmail"] for r in search_users_by_gmail(term)]
+
 
 # ---------------------------------------------------------------------------
 # Sidebar navigation
@@ -628,23 +638,23 @@ elif page == "Encode Message":
         # 2. Recipient search
         with st.container(border=True):
             st.markdown('<div class="pb-section">2 · Recipient</div>', unsafe_allow_html=True)
-            search_q = st.text_input("Search user by Gmail", placeholder="type part of gmail…")
-            selected_user = None
 
-            if search_q:
-                results = search_users_by_gmail(search_q)
-                if results:
-                    options = {r["gmail"]: r for r in results}
-                    choice = st.selectbox("Select recipient", list(options.keys()))
-                    selected_user = options[choice]
-                    st.text_area(
-                        "Recipient Public Key (read-only)",
-                        value=selected_user["public_key"],
-                        height=140,
-                        disabled=True,
-                    )
-                else:
-                    st.info("No users found matching that Gmail.")
+            selected_gmail = st_searchbox(
+                search_recipient_gmails,
+                label="",
+                placeholder="Start typing a Gmail…",
+                key="recipient_searchbox",
+            )
+
+            selected_user = get_user_by_gmail(selected_gmail) if selected_gmail else None
+
+            if selected_user:
+                st.text_area(
+                    "Recipient Public Key",
+                    value=selected_user["public_key"],
+                    height=140,
+                    disabled=True,
+                )
 
         # 3. Secret & password
         with st.container(border=True):
@@ -655,7 +665,7 @@ elif page == "Encode Message":
                 placeholder="Type the confidential text you want to hide…",
             )
             password = st.text_input(
-                "Password (will be encrypted with recipient’s public key)",
+                "Password for AES encryption",
                 type="password",
                 help="This password is used for AES. It will be encrypted with the selected user's public key before sending.",
             )
@@ -857,7 +867,7 @@ elif page == "Decode Message":
         with st.container(border=True):
             st.markdown('<div class="pb-section">2 · Encrypted password</div>', unsafe_allow_html=True)
             encrypted_pw_b64 = st.text_input(
-                "Encrypted password (from the email)",
+                "Encrypted password (base64)",
                 placeholder="Paste the long base64 string that was sent with the image",
                 help="This was encrypted with your public key. Only your private key can decrypt it.",
             )
@@ -866,7 +876,7 @@ elif page == "Decode Message":
         with st.container(border=True):
             st.markdown('<div class="pb-section">3 · Your Private Key</div>', unsafe_allow_html=True)
             private_key_file = st.file_uploader(
-                "Upload your private key (.txt)",
+                "Upload your private key",
                 type=["txt"],
                 help="The private key file you downloaded when you created your account.",
             )
@@ -1013,7 +1023,7 @@ elif page == "Image Analysis":
                            "The dashed amber line is the 0.30 detection threshold.")
 
             with st.container(border=True):
-                st.markdown('<div class="pb-section">LSB planes (all channels)</div>',
+                st.markdown('<div class="pb-section">LSB planes</div>',
                             unsafe_allow_html=True)
                 planes = lsb_planes(img)
                 length = head["length"] if head["found"] else None
