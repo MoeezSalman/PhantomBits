@@ -737,7 +737,6 @@ elif page == "Encode Message":
                                     server.send_message(msg)
 
                                 st.success(f"✅ Image + encrypted password sent to **{receiver_email}**!")
-                                st.balloons()
                             except Exception as e:
                                 st.error(f"Failed to send email: {e}")
                 with col_cancel:

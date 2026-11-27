@@ -93,6 +93,20 @@ section[data-testid="stSidebar"],
     .auth-left { display: none; }
     .st-key-auth_form { padding: 1.5rem 1rem; }
 }
+
+/* hide the scrollbar */
+* { scrollbar-width: none !important; -ms-overflow-style: none !important; }
+*::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
+
+/* remove Streamlit's empty bottom gap so the page fits the window */
+.block-container,
+[data-testid="stMainBlockContainer"] { padding-bottom: 0 !important; }
+
+/* and stop the page from scrolling */
+html, body, .stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"],
+section.main { overflow: hidden !important; }
 </style>
 """
 
