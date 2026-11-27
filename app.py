@@ -5,6 +5,7 @@ Member 1: Dashboard + navigation + Encode page
 
 from __future__ import annotations
 import io
+import html
 import urllib.parse
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -237,6 +238,24 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 .stTextArea textarea, .stTextInput input {
     background: rgba(255,255,255,.95) !important; color: var(--mist) !important;
     border: 1px solid var(--line) !important; border-radius: 12px !important;
+}
+/* Original decrypted message - expands naturally */
+.pb-original-message {
+    background: rgba(255,255,255,.95);
+    color: var(--mist);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 1.2rem;
+    width: 100%;
+    box-sizing: border-box;
+
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+
+    line-height: 1.7;
+    font-family: 'DM Mono', monospace;
+    font-size: .95rem;
 }
 .stTextArea textarea:focus, .stTextInput input:focus {
     border-color: var(--violet) !important; box-shadow: 0 0 0 3px rgba(13,148,136,.25) !important;
@@ -866,8 +885,13 @@ elif page == "Decode Message":
                         message = decrypt_message(encrypted, real_password)
 
                     st.success("Message successfully recovered and verified.")
+
                     st.markdown("### Original message")
-                    st.code(message, language=None)
+
+                    st.markdown(
+                        f'<div class="pb-original-message">{html.escape(message)}</div>',
+                        unsafe_allow_html=True
+                    )
 
                 except ValueError as e:
                     # This catches both wrong private key and wrong AES password / corrupted data
